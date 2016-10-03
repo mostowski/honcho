@@ -1,3 +1,6 @@
+import psutil
+import os
+
 import datetime
 import multiprocessing
 import signal
@@ -97,8 +100,33 @@ class Manager(object):
             self.returncode = SIGNALS[signum]['rc']
             self.terminate()
 
+        """
+        If pid=1 honcho act as init processus and must wait for orphean 
+        process to avoid zombie.
+        This is usefull when you use honcho as entrypoint in docker image.
+        """
+        def _wait_zombie():
+                for proc in psutil.process_iter():
+                        try:
+                               if proc.status == psutil.STATUS_ZOMBIE:
+                                       proc.wait(timeout=KILL_WAIT)
+                        except psutil.NoSuchProcess:
+                                pass
+
+        """
+        When SIGCHLD is receive call _wait_zombie to get rid of defunct
+        """
+	def _sig_chld(signum, frame):
+                _wait_zombie()
+
         signal.signal(signal.SIGTERM, _terminate)
         signal.signal(signal.SIGINT, _terminate)
+
+        """
+        If pid=1 init call back _sig_chld to get rid of defunct
+        """
+        if os.getpid() == 1:
+                signal.signal(signal.SIGCHLD, _sig_chld)
 
         self._start()
 
